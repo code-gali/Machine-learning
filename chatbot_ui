@@ -1,0 +1,179 @@
+def initialize_chatbot(self, state: HealthAnalysisState) -> HealthAnalysisState:
+        """LangGraph Node 9: Initialize interactive chatbot with chunked context"""
+        logger.info("💬 LangGraph Node 9: Initializing interactive chatbot with intelligent chunking...")
+        state["current_step"] = "initialize_chatbot"
+        state["step_status"]["initialize_chatbot"] = "running"
+       
+        try:
+            # Prepare chatbot context with all data
+            chatbot_context = {
+                "deidentified_medical": state.get("deidentified_medical", {}),
+                "deidentified_pharmacy": state.get("deidentified_pharmacy", {}),
+                "medical_extraction": state.get("medical_extraction", {}),
+                "pharmacy_extraction": state.get("pharmacy_extraction", {}),
+                "entity_extraction": state.get("entity_extraction", {}),
+                "health_trajectory": state.get("health_trajectory", ""),
+                "final_summary": state.get("final_summary", ""),
+                "heart_attack_prediction": state.get("heart_attack_prediction", {}),
+                "heart_attack_risk_score": state.get("heart_attack_risk_score", 0.0),
+                "heart_attack_features": state.get("heart_attack_features", {}),
+                "patient_overview": {
+                    "age": state.get("deidentified_medical", {}).get("src_mbr_age", "unknown"),
+                    "zip": state.get("deidentified_medical", {}).get("src_mbr_zip_cd", "unknown"),
+                    "analysis_timestamp": datetime.now().isoformat(),
+                    "heart_attack_risk_level": state.get("heart_attack_prediction", {}).get("risk_level", "unknown"),
+                    "model_type": "fastapi_server"
+                }
+            }
+           
+            # Initialize chunked data cache
+            state["chunked_data_cache"] = {}
+           
+            state["chat_history"] = []
+            state["chatbot_context"] = chatbot_context
+            state["chatbot_ready"] = True
+            state["processing_complete"] = True
+            state["step_status"]["initialize_chatbot"] = "completed"
+           
+            logger.info("✅ Successfully initialized interactive chatbot with intelligent chunking")
+           
+        except Exception as e:
+            error_msg = f"Error initializing chatbot: {str(e)}"
+            state["errors"].append(error_msg)
+            state["step_status"]["initialize_chatbot"] = "error"
+            logger.error(error_msg)
+       
+        return state
+   
+    def handle_error(self, state: HealthAnalysisState) -> HealthAnalysisState:
+        """LangGraph Node: Error handling"""
+        logger.error(f"🚨 LangGraph Error Handler: {state['current_step']}")
+        logger.error(f"Errors: {state['errors']}")
+       
+        state["processing_complete"] = True
+        current_step = state.get("current_step", "unknown")
+        state["step_status"][current_step] = "error"
+        return state
+   
+    # ===== LANGGRAPH CONDITIONAL EDGES =====
+   
+    def should_continue_after_api(self, state: HealthAnalysisState) -> Literal["continue", "retry", "error"]:
+        if state["errors"]:
+            if state["retry_count"] < self.config.max_retries:
+                state["retry_count"] += 1
+                logger.warning(f"🔄 Retrying API fetch (attempt {state['retry_count']}/{self.config.max_retries})")
+                state["errors"] = []
+                return "retry"
+            else:
+                logger.error(f"❌ Max retries ({self.config.max_retries}) exceeded for API fetch")
+                return "error"
+        return "continue"
+   
+    def should_continue_after_deidentify(self, state: HealthAnalysisState) -> Literal["continue", "error"]:
+        return "error" if state["errors"] else "continue"
+   
+    def should_continue_after_extraction_step(self, state: HealthAnalysisState) -> Literal["continue", "error"]:
+        return "error" if state["errors"] else "continue"
+   
+    def should_continue_after_entity_extraction(self, state: HealthAnalysisState) -> Literal["continue", "error"]:
+        return "error" if state["errors"] else "continue"
+   
+    def should_continue_after_trajectory(self, state: HealthAnalysisState) -> Literal["continue", "error"]:
+        return "error" if state["errors"] else "continue"
+   
+    def should_continue_after_summary(self, state: HealthAnalysisState) -> Literal["continue", "error"]:
+        return "error" if state["errors"] else "continue"
+   
+    def should_continue_after_heart_attack_prediction(self, state: HealthAnalysisState) -> Literal["continue", "error"]:
+        return "error" if state["errors"] else "continue"
+   
+    # ===== ENHANCED CHATBOT FUNCTIONALITY WITH INTELLIGENT CHUNKING =====
+   
+    def chat_with_data(self, user_query: str, chat_context: Dict[str, Any], chat_history: List[Dict[str, str]]) -> str:
+        """Enhanced chatbot conversation with intelligent chunking for large datasets"""
+        try:
+            logger.info(f"💬 Processing query with intelligent chunking: {user_query[:50]}...")
+           
+            # Use enhanced data chunker to create focused context
+            focused_context = self.data_chunker.create_focused_context(chat_context, user_query)
+           
+            # Build conversation history for continuity (last 6 messages)
+            history_text = ""
+            if chat_history:
+                recent_history = chat_history[-6:]
+                history_text = "\n".join([
+                    f"{'User' if msg['role'] == 'user' else 'Assistant'}: {msg['content']}"
+                    for msg in recent_history
+                ])
+           
+            # Create optimized prompt with focused context
+            optimized_prompt = f"""You are an expert medical data assistant with access to focused patient health records. Answer the user's question with specific, detailed information from the medical data provided.
+ 
+FOCUSED PATIENT DATA (optimized for your query):
+{focused_context}
+ 
+RECENT CONVERSATION HISTORY:
+{history_text}
+ 
+USER QUESTION: {user_query}
+ 
+Please provide a detailed, professional medical analysis based on the deidentified data. Focus on:
+1. Relevant medical findings from the data
+2. Clinical interpretation of the extracted information
+3. Potential health implications
+4. Professional medical insights based on the available data
+ 
+DETAILED ANSWER:"""
+ 
+            logger.info(f"🤖 Sending optimized prompt to Snowflake Cortex ({self.data_chunker.estimate_tokens(optimized_prompt)} estimated tokens)")
+           
+            # Use API integrator for LLM call
+            response = self.api_integrator.call_llm(optimized_prompt)
+           
+            if response.startswith("Error"):
+                # Fallback for very large contexts
+                logger.warning("⚠️ Primary response failed, trying fallback approach...")
+                fallback_response = self._handle_fallback_response(user_query, chat_context)
+                return fallback_response
+           
+            return response
+           
+        except Exception as e:
+            logger.error(f"Error in enhanced chatbot conversation: {str(e)}")
+            return f"I encountered an error processing your question: {str(e)}. Please try asking a more specific question about diagnoses, medications, or risk factors."
+   
+    def _handle_fallback_response(self, user_query: str, chat_context: Dict[str, Any]) -> str:
+        """Fallback response strategy for very large contexts"""
+        try:
+            # Create a minimal context with just the most relevant data
+            minimal_context = {}
+           
+            # Include only patient overview
+            if 'patient_overview' in chat_context:
+                minimal_context['patient_overview'] = chat_context['patient_overview']
+           
+            # Include entity extraction (usually small)
+            if 'entity_extraction' in chat_context:
+                minimal_context['entity_extraction'] = chat_context['entity_extraction']
+           
+            # Include heart attack prediction (small)
+            if 'heart_attack_prediction' in chat_context:
+                minimal_context['heart_attack_prediction'] = chat_context['heart_attack_prediction']
+           
+            fallback_prompt = f"""Based on the limited patient data available, please answer this question: {user_query}
+ 
+Available patient information:
+{json.dumps(minimal_context, indent=2)}
+ 
+Please provide the best answer possible with the available data and mention if more detailed information might be available in the full medical records."""
+           
+            response = self.api_integrator.call_llm(fallback_prompt)
+           
+            if response.startswith("Error"):
+                return "I'm having trouble accessing the medical data right now. Please try asking a more specific question, such as 'What medications is this patient taking?' or 'What is the heart attack risk assessment?'"
+           
+            return response + "\n\n*Note: This response is based on limited data due to size constraints. More detailed information may be available in the complete medical records.*"
+           
+        except Exception as e:
+            logger.error(f"Fallback response also failed: {e}")
+            return "I'm experiencing technical difficulties accessing the medical data. Please try asking a simpler, more specific question."
